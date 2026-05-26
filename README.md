@@ -1,6 +1,6 @@
 # HW211 ESPHome
 
-ESPHome external component and example configuration for reading HW211-family heat pump controllers locally over Modbus RTU.
+ESPHome external component for reading HW211-family heat pump controllers locally over Modbus RTU.
 
 Based on the work of others compiled here https://community.home-assistant.io/t/implementation-of-aqua-temp-controller/230400/.
 
