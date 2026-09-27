@@ -5,7 +5,7 @@ import re
 from pathlib import Path
 
 import esphome.codegen as cg
-from esphome.components import binary_sensor, number, select, sensor, switch
+from esphome.components import binary_sensor, datetime, number, select, sensor, switch
 from esphome.components.modbus import helpers as modbus_helpers
 from esphome.components.modbus.helpers import MODBUS_REGISTER_TYPE, SENSOR_VALUE_TYPE
 from esphome.components.modbus_controller import ModbusController, SensorItem
@@ -47,7 +47,7 @@ from esphome.const import (
 
 
 DEPENDENCIES = ["modbus_controller"]
-AUTO_LOAD = ["binary_sensor", "number", "select", "sensor", "switch"]
+AUTO_LOAD = ["binary_sensor", "datetime", "number", "select", "sensor", "switch"]
 CODEOWNERS = ["@local"]
 
 CONF_INCLUDE_RESERVED = "include_reserved"
@@ -57,10 +57,36 @@ CONF_SHEET = "sheet"
 CONF_CREATE_CONTROLS = "create_controls"
 CONF_CREATE_SENSORS = "create_sensors"
 CONF_CREATE_BINARY_SENSORS = "create_binary_sensors"
+CONF_CREATE_SCHEDULE = "create_schedule"
 
 REGISTER_TYPE_HOLDING = MODBUS_REGISTER_TYPE["holding"]
 VALUE_TYPE_U_WORD = SENSOR_VALUE_TYPE["U_WORD"]
 MODBUS_USES_SPAN = hasattr(modbus_helpers, "EntityType")
+
+modbus_controller_ns = cg.esphome_ns.namespace("modbus_controller")
+Hw211ScheduleTime = modbus_controller_ns.class_(
+    "Hw211ScheduleTime", datetime.TimeEntity, cg.Component, SensorItem
+)
+Hw211ScheduleEnableSwitch = modbus_controller_ns.class_(
+    "Hw211ScheduleEnableSwitch", switch.Switch, cg.Component, SensorItem
+)
+
+SCHEDULE_PERIODS = (
+    # Register 1133 uses one start-enable and one end-enable bit per period.
+    {
+        "period": 1,
+        "enable_mask": 0x0003,
+        "start_address": 1134,
+        "end_address": 1136,
+    },
+    {
+        "period": 2,
+        "enable_mask": 0x000C,
+        "start_address": 1138,
+        "end_address": 1140,
+    },
+)
+SCHEDULE_ENABLE_ADDRESS = 1133
 
 
 def _read_buffer_type():
@@ -89,6 +115,10 @@ def _name(register: dict) -> str:
 
 def _entity_id(prefix: str, register: dict, suffix: str):
     return f"{_slug(prefix)}_{register['address']}_{_slug(_name(register))}_{suffix}"
+
+
+def _schedule_entity_id(prefix: str, period: int, suffix: str):
+    return f"{_slug(prefix)}_timer_{period}_{suffix}"
 
 
 def _entity_name(config: dict, register: dict, label: str | None = None) -> str:
@@ -380,6 +410,25 @@ def _declare_generated_ids(config: dict):
                 )
             )
 
+    if config[CONF_CREATE_SCHEDULE]:
+        for schedule in SCHEDULE_PERIODS:
+            period = schedule["period"]
+            ids.extend(
+                (
+                    cv.declare_id(Hw211ScheduleEnableSwitch)(
+                        _schedule_entity_id(
+                            config[CONF_NAME_PREFIX], period, "enabled"
+                        )
+                    ),
+                    cv.declare_id(Hw211ScheduleTime)(
+                        _schedule_entity_id(config[CONF_NAME_PREFIX], period, "start")
+                    ),
+                    cv.declare_id(Hw211ScheduleTime)(
+                        _schedule_entity_id(config[CONF_NAME_PREFIX], period, "end")
+                    ),
+                )
+            )
+
     config["_hw211_generated_ids"] = ids
     return config
 
@@ -614,12 +663,88 @@ async def _register_modbus_binary_sensor(config: dict, register: dict, bit: int,
     cg.add(parent.add_sensor_item(var))
 
 
+async def _register_schedule_time(
+    config: dict, period: int, label: str, address: int
+):
+    id_ = cv.declare_id(Hw211ScheduleTime)(
+        _schedule_entity_id(config[CONF_NAME_PREFIX], period, label.lower())
+    )
+    entity = {
+        CONF_ID: id_,
+        CONF_NAME: f"Timer {period} {label}",
+        CONF_INTERNAL: False,
+        CONF_DISABLED_BY_DEFAULT: False,
+        CONF_ENTITY_CATEGORY: "config",
+    }
+    _apply_entity_schema(entity, datetime.time_schema(Hw211ScheduleTime))
+
+    var = cg.new_Pvariable(entity[CONF_ID], REGISTER_TYPE_HOLDING, address)
+    await cg.register_component(var, entity)
+    await datetime.register_datetime(var, entity)
+    parent = await cg.get_variable(config[CONF_MODBUS_CONTROLLER_ID])
+    cg.add(var.set_parent(parent))
+    cg.add(parent.add_sensor_item(var))
+
+
+async def _register_schedule_enable_switch(config: dict, period: int, bitmask: int):
+    id_ = cv.declare_id(Hw211ScheduleEnableSwitch)(
+        _schedule_entity_id(config[CONF_NAME_PREFIX], period, "enabled")
+    )
+    entity = {
+        CONF_ID: id_,
+        CONF_NAME: f"Timer {period} Enabled",
+        CONF_INTERNAL: False,
+        CONF_DISABLED_BY_DEFAULT: False,
+        CONF_ENTITY_CATEGORY: "config",
+    }
+    _apply_entity_schema(
+        entity,
+        switch.switch_schema(
+            Hw211ScheduleEnableSwitch, default_restore_mode="DISABLED"
+        ),
+    )
+
+    var = cg.new_Pvariable(
+        entity[CONF_ID],
+        REGISTER_TYPE_HOLDING,
+        SCHEDULE_ENABLE_ADDRESS,
+        bitmask,
+    )
+    await cg.register_component(var, entity)
+    await switch.register_switch(var, entity)
+    parent = await cg.get_variable(config[CONF_MODBUS_CONTROLLER_ID])
+    cg.add(var.set_parent(parent))
+    cg.add(parent.add_sensor_item(var))
+    return var
+
+
+async def _register_schedule(config: dict):
+    enable_switches = []
+    for schedule in SCHEDULE_PERIODS:
+        period = schedule["period"]
+        enable_switches.append(
+            await _register_schedule_enable_switch(
+                config, period, schedule["enable_mask"]
+            )
+        )
+        await _register_schedule_time(
+            config, period, "Start", schedule["start_address"]
+        )
+        await _register_schedule_time(
+            config, period, "End", schedule["end_address"]
+        )
+
+    cg.add(enable_switches[0].set_peer(enable_switches[1]))
+    cg.add(enable_switches[1].set_peer(enable_switches[0]))
+
+
 async def to_code(config):
     cg.add_global(
         cg.RawStatement(
             '#include "esphome/components/hw211/modbus_binarysensor.h"\n'
             '#include "esphome/components/hw211/modbus_number.h"\n'
             '#include "esphome/components/hw211/modbus_select.h"\n'
+            '#include "esphome/components/hw211/modbus_schedule.h"\n'
             '#include "esphome/components/hw211/modbus_sensor.h"\n'
             '#include "esphome/components/hw211/modbus_switch.h"'
         )
@@ -659,6 +784,9 @@ async def to_code(config):
         if _is_readable(register) and config[CONF_CREATE_SENSORS]:
             await _register_modbus_sensor(config, register)
 
+    if config[CONF_CREATE_SCHEDULE]:
+        await _register_schedule(config)
+
 
 CONFIG_SCHEMA = cv.All(
     cv.Schema(
@@ -672,6 +800,7 @@ CONFIG_SCHEMA = cv.All(
             cv.Optional(CONF_CREATE_CONTROLS, default=False): cv.boolean,
             cv.Optional(CONF_CREATE_SENSORS, default=True): cv.boolean,
             cv.Optional(CONF_CREATE_BINARY_SENSORS, default=True): cv.boolean,
+            cv.Optional(CONF_CREATE_SCHEDULE, default=False): cv.boolean,
         }
     ),
     _declare_generated_ids,

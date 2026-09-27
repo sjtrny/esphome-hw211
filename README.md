@@ -45,6 +45,7 @@ modbus_controller:
 
 hw211:
   modbus_controller_id: hw211_modbus
+  create_schedule: true
   create_controls: false
   create_binary_sensors: false
 ```
@@ -77,6 +78,7 @@ hw211:
   name_prefix: "HW211"
   sheet: dtu_wifi
   create_sensors: true
+  create_schedule: false
   create_controls: false
   create_binary_sensors: true
   raw_registers: false
@@ -87,12 +89,24 @@ hw211:
 - `name_prefix`: Prefix used for generated entity IDs.
 - `sheet`: Register sheet to use. Supported values are `dtu_wifi` and `hw211`.
 - `create_sensors`: Create readable sensor entities.
+- `create_schedule`: Create native time controls and enable switches for the two daily timer periods.
 - `create_controls`: Create writable number/select/switch entities. Keep this off until you are comfortable writing to the controller.
 - `create_binary_sensors`: Create binary sensors for readable bitfields.
 - `raw_registers`: Also create disabled-by-default raw register sensors.
 - `force_update`: Publish sensor updates in home assistant even when the value has not changed.
 
-Start read-only. Modbus writes can change water heater operating mode, targets, schedules, offsets, and safety-related parameters. Enable `create_controls` only after confirming your model, controller, register map, and wiring.
+Start read-only. Modbus writes can change water heater operating mode, targets, schedules, offsets, and safety-related parameters. Enable `create_schedule` or `create_controls` only after confirming your model, controller, register map, and wiring.
+
+## Daily Timer Schedule
+
+Set `create_schedule: true` to create these entities without enabling the other writable controller parameters:
+
+- `Timer 1 Start`, `Timer 1 End`, and `Timer 1 Enabled`.
+- `Timer 2 Start`, `Timer 2 End`, and `Timer 2 Enabled`.
+
+The controller runs during each enabled interval and stops outside enabled intervals. Each enable switch controls the matching start and end events together. Timer settings are read from the controller before writes are accepted, and writes preserve the other timer's enable bits. Times have one-minute precision and use the clock configured on the HW211 controller; this component does not synchronize that clock.
+
+Configure the start and end time before enabling a timer.
 
 ## ESPHome Compatibility
 

@@ -38,5 +38,6 @@ hw211:
   modbus_controller_id: hw211_modbus
   name_prefix: HW211 CI
   create_sensors: true
+  create_schedule: true
   create_controls: true
   create_binary_sensors: true
