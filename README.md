@@ -126,6 +126,11 @@ migrate the names without replacing existing entity IDs, history, or automation
 references. User-set names in Home Assistant still take precedence. Fresh
 installations receive entity IDs based on the new names.
 
+After updating an existing device, reload its ESPHome integration entry in
+Home Assistant if the old sections remain. Home Assistant can cache entity
+categories across a firmware reconnect. Reloading refreshes the metadata; no
+entity renaming or local category overrides are needed.
+
 Only presentation metadata changes: register addresses, scaling, enum values,
 bit polarity, and writes are unchanged. Display units are corrected for defrost
 interval, electric-heater delay, expansion-valve positions, and run-time counters

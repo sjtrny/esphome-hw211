@@ -48,6 +48,10 @@ reserved registers keep an address-based name. ESPHome IDs and API keys retain
 their original names internally so existing Home Assistant entities can migrate.
 User-defined HA names remain in effect until cleared.
 
+If an existing installation shows the new names in the old sections, reload
+that device's ESPHome integration entry to refresh Home Assistant's cached
+categories. This does not require local category overrides.
+
 The exception to legacy key retention is the HW211 sheet's optional raw timer
 fields (1134–1141). Their old Chinese names collapsed to duplicate ASCII IDs and
 prevented raw configurations from compiling. They now use distinct,
