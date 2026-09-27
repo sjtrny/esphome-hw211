@@ -21,6 +21,9 @@ class Hw211ScheduleTime : public datetime::TimeEntity,
   }
 
   void dump_config() override;
+  // Preserve the original API key when the display name changes. Home Assistant
+  // uses the stable key to migrate the name without replacing the entity.
+  void set_api_key(uint32_t key) { this->object_id_hash_ = key; }
   void parse_and_publish(Hw211ReadBuffer data) override;
   float get_setup_priority() const override { return setup_priority::HARDWARE; }
   void set_parent(ModbusController *parent) {

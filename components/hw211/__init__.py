@@ -26,6 +26,7 @@ from esphome.components.modbus_controller.sensor import ModbusSensor
 from esphome.components.modbus_controller.switch import ModbusSwitch
 import esphome.config_validation as cv
 from esphome.core import Lambda
+from esphome.helpers import fnv1_hash_object_id
 from esphome.const import (
     CONF_ACCURACY_DECIMALS,
     CONF_ADDRESS,
@@ -666,12 +667,16 @@ async def _register_modbus_binary_sensor(config: dict, register: dict, bit: int,
 async def _register_schedule_time(
     config: dict, period: int, label: str, address: int
 ):
+    # Home Assistant sorts device controls by name. Start sorts before Stop,
+    # but after End. Keep the original ID/key so existing entities can migrate.
+    original_name = f"Timer {period} {label}"
+    display_label = "Stop" if label == "End" else label
     id_ = cv.declare_id(Hw211ScheduleTime)(
         _schedule_entity_id(config[CONF_NAME_PREFIX], period, label.lower())
     )
     entity = {
         CONF_ID: id_,
-        CONF_NAME: f"Timer {period} {label}",
+        CONF_NAME: f"Timer {period} {display_label}",
         CONF_INTERNAL: False,
         CONF_DISABLED_BY_DEFAULT: False,
         CONF_ENTITY_CATEGORY: "config",
@@ -681,6 +686,7 @@ async def _register_schedule_time(
     var = cg.new_Pvariable(entity[CONF_ID], REGISTER_TYPE_HOLDING, address)
     await cg.register_component(var, entity)
     await datetime.register_datetime(var, entity)
+    cg.add(var.set_api_key(fnv1_hash_object_id(original_name)))
     parent = await cg.get_variable(config[CONF_MODBUS_CONTROLLER_ID])
     cg.add(var.set_parent(parent))
     cg.add(parent.add_sensor_item(var))

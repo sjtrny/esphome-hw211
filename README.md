@@ -101,8 +101,12 @@ Start read-only. Modbus writes can change water heater operating mode, targets, 
 
 Set `create_schedule: true` to create these entities without enabling the other writable controller parameters:
 
-- `Timer 1 Start`, `Timer 1 End`, and `Timer 1 Enabled`.
-- `Timer 2 Start`, `Timer 2 End`, and `Timer 2 Enabled`.
+- `Timer 1 Enabled`, `Timer 1 Start`, and `Timer 1 Stop`.
+- `Timer 2 Enabled`, `Timer 2 Start`, and `Timer 2 Stop`.
+
+Home Assistant sorts the device page by name. These default names put each timer's enable switch first, then its start time, then its stop time. No local name overrides or custom dashboard are needed. Stop is the timer's end time.
+
+Earlier versions called the stop controls `Timer 1 End` and `Timer 2 End`. Their ESPHome IDs and API keys are retained so Home Assistant can migrate the names while keeping existing entity IDs. A user-set name in Home Assistant takes precedence over the component's default; clear that name to use the new default. Updating the component does not change the stored times or enable flags.
 
 The controller runs during each enabled interval and stops outside enabled intervals. Each enable switch controls the matching start and end events together. Timer settings are read from the controller before writes are accepted, and writes preserve the other timer's enable bits. Times have one-minute precision and use the clock configured on the HW211 controller; this component does not synchronize that clock.
 
