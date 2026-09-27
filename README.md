@@ -33,6 +33,11 @@ uart:
   parity: NONE
   stop_bits: 1
 
+modbus:
+  uart_id: rs485
+  send_wait_time: 250ms
+  turnaround_time: 100ms
+
 modbus_controller:
   - id: hw211_modbus
     address: 99
@@ -92,6 +97,8 @@ Start read-only. Modbus writes can change water heater operating mode, targets, 
 ## ESPHome Compatibility
 
 The component supports the ESPHome 2026.4 API used by the original EvoHeat installation and the current ESPHome API.
+
+Keep `send_wait_time: 250ms` and `turnaround_time: 100ms` explicit. ESPHome 2026.9 increased the Modbus client defaults to 2000ms and 600ms. An EvoHeat HW211 controller emits traffic about every 500ms, so the newer defaults can prevent the client from finding an idle window in which to send requests.
 
 GitHub Actions compiles a configuration that enables sensors, binary sensors, numbers, selects, and switches. Each change is checked against ESPHome 2026.4.5 and the tracked stable release. A weekly scheduled run also checks the latest stable release and ESPHome's development branch. Dependabot checks for stable ESPHome releases each day and opens a pull request that runs the same compile checks.
 

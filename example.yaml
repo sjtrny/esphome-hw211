@@ -52,6 +52,8 @@ uart:
 
 modbus:
   uart_id: rs485
+  send_wait_time: 250ms
+  turnaround_time: 100ms
 
 modbus_controller:
   - id: hw211_modbus
