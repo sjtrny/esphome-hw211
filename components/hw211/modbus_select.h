@@ -13,6 +13,9 @@ namespace modbus_controller {
 
 class ModbusSelect : public Component, public select::Select, public SensorItem, public Hw211WriterEntity {
  public:
+  // Preserve entity identity when its human-readable name changes.
+  void set_api_key(uint32_t key) { this->object_id_hash_ = key; }
+
   ModbusSelect(SensorValueType sensor_value_type, uint16_t start_address, uint8_t register_count, uint16_t skip_updates,
                bool force_new_range, std::vector<int64_t> mapping) {
     hw211_configure_item(this, Hw211RegisterType::HOLDING, sensor_value_type, start_address, 0, register_count,

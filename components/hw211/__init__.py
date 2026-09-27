@@ -46,6 +46,14 @@ from esphome.const import (
     CONF_UNIT_OF_MEASUREMENT,
 )
 
+from .entity_metadata import (
+    BIT_NAMES,
+    PRIMARY_BITS,
+    PRIMARY_REGISTERS,
+    REGISTER_NAMES,
+    UNIT_OVERRIDES,
+)
+
 
 DEPENDENCIES = ["modbus_controller"]
 AUTO_LOAD = ["binary_sensor", "datetime", "number", "select", "sensor", "switch"]
@@ -122,12 +130,48 @@ def _schedule_entity_id(prefix: str, period: int, suffix: str):
     return f"{_slug(prefix)}_timer_{period}_{suffix}"
 
 
-def _entity_name(config: dict, register: dict, label: str | None = None) -> str:
+def _legacy_entity_name(config: dict, register: dict, label: str | None = None) -> str:
+    """Original names remain the source of stable native API keys."""
     name = (label or _name(register)).replace("_", " ")
     name = name[:1].upper() + name[1:]
     if not label and _slug(name) in config.get("_hw211_duplicate_names", set()):
         return f"{name} {register['address']}"
     return name
+
+
+def _entity_name(config: dict, register: dict, bit: int | None = None) -> str:
+    sheet = config[CONF_SHEET]
+    address = register["address"]
+    name = REGISTER_NAMES[sheet].get(address, f"Register {address}")
+    if bit is not None:
+        return BIT_NAMES[sheet].get(address, {}).get(bit, f"{name} bit {bit}")
+    return name
+
+
+def _entity_category(
+    config: dict, register: dict, *, writable: bool = False,
+    raw: bool = False, bit: int | None = None,
+) -> str:
+    sheet = config[CONF_SHEET]
+    address = register["address"]
+    if not raw:
+        if bit is None and address in PRIMARY_REGISTERS[sheet]:
+            return ""
+        if bit in PRIMARY_BITS[sheet].get(address, set()):
+            return ""
+    return "config" if writable else "diagnostic"
+
+
+def _preserve_api_key(var, config: dict, register: dict, *, raw=False, label=None):
+    # HA matches an existing entity by its native API key when its name changes.
+    # Keep both that key and the generated C++ ID independent of display metadata.
+    name = _legacy_entity_name(config, register, label) + (" Raw" if raw else "")
+    if raw and config[CONF_SHEET] == "hw211" and 1134 <= register["address"] <= 1141:
+        # Each period's four Chinese timer names collapse to the same ASCII ID.
+        # Older raw configurations failed validation; there is no distinct legacy
+        # key to preserve for these fields. Use the address to distinguish them.
+        name += f" {register['address']}"
+    cg.add(var.set_api_key(fnv1_hash_object_id(name)))
 
 
 def _has_register_metadata(register: dict) -> bool:
@@ -199,7 +243,10 @@ def _step(data_type: str) -> float:
     }.get(data_type, 1.0)
 
 
-def _unit(register: dict) -> str | None:
+def _unit(config: dict, register: dict) -> str | None:
+    override = UNIT_OVERRIDES[config[CONF_SHEET]].get(register["address"])
+    if override:
+        return override
     data_type = register["data_type"]
     text = register["description"].lower()
     if data_type in ("TEMP", "TEMP1") or "℃" in register["description"]:
@@ -444,6 +491,7 @@ async def _register_modbus_sensor(config: dict, register: dict, *, raw: bool = F
     entity.update(
         {
             CONF_NAME: _entity_name(config, register) + (" Raw" if raw else ""),
+            CONF_ENTITY_CATEGORY: _entity_category(config, register, raw=raw),
             CONF_BITMASK: 0xFFFFFFFF,
             CONF_INTERNAL: False,
             CONF_DISABLED_BY_DEFAULT: raw,
@@ -451,7 +499,7 @@ async def _register_modbus_sensor(config: dict, register: dict, *, raw: bool = F
             CONF_ACCURACY_DECIMALS: 0 if raw else (1 if data_type in ("TEMP", "TEMP1", "DIGI5") else 0),
         }
     )
-    unit = None if raw else _unit(register)
+    unit = None if raw else _unit(config, register)
     if unit:
         entity[CONF_UNIT_OF_MEASUREMENT] = unit
     if not raw and data_type in ("TEMP", "TEMP1"):
@@ -474,6 +522,7 @@ async def _register_modbus_sensor(config: dict, register: dict, *, raw: bool = F
     )
     await cg.register_component(var, entity)
     await sensor.register_sensor(var, entity)
+    _preserve_api_key(var, config, register, raw=raw)
     parent = await cg.get_variable(entity[CONF_MODBUS_CONTROLLER_ID])
     cg.add(parent.add_sensor_item(var))
     if "lambda" in entity:
@@ -498,6 +547,7 @@ async def _register_modbus_number(config: dict, register: dict):
     entity.update(
         {
             CONF_NAME: _entity_name(config, register),
+            CONF_ENTITY_CATEGORY: _entity_category(config, register, writable=True),
             CONF_BITMASK: 0xFFFFFFFF,
             CONF_MIN_VALUE: range_[0] if range_ else 0,
             CONF_MAX_VALUE: range_[1] if range_ else 65535,
@@ -507,7 +557,7 @@ async def _register_modbus_number(config: dict, register: dict):
             CONF_DISABLED_BY_DEFAULT: False,
         }
     )
-    unit = _unit(register)
+    unit = _unit(config, register)
     if unit:
         entity[CONF_UNIT_OF_MEASUREMENT] = unit
     if data_type in ("TEMP", "TEMP1"):
@@ -537,6 +587,7 @@ async def _register_modbus_number(config: dict, register: dict):
         max_value=entity[CONF_MAX_VALUE],
         step=entity[CONF_STEP],
     )
+    _preserve_api_key(var, config, register)
     parent = await cg.get_variable(entity[CONF_MODBUS_CONTROLLER_ID])
     cg.add(var.set_parent(parent))
     cg.add(parent.add_sensor_item(var))
@@ -571,6 +622,7 @@ async def _register_modbus_select(config: dict, register: dict, options: dict[st
     entity.update(
         {
             CONF_NAME: _entity_name(config, register),
+            CONF_ENTITY_CATEGORY: _entity_category(config, register, writable=True),
             "optionsmap": options,
             CONF_USE_WRITE_MULTIPLE: False,
             CONF_OPTIMISTIC: False,
@@ -590,6 +642,7 @@ async def _register_modbus_select(config: dict, register: dict, options: dict[st
     )
     await cg.register_component(var, entity)
     await select.register_select(var, entity, options=list(options.keys()))
+    _preserve_api_key(var, config, register)
     parent = await cg.get_variable(entity[CONF_MODBUS_CONTROLLER_ID])
     cg.add(parent.add_sensor_item(var))
     cg.add(var.set_parent(parent))
@@ -604,9 +657,8 @@ async def _register_modbus_switch(config: dict, register: dict, *, bit: int | No
     entity = _base_modbus_config(config, register, id_)
     entity.update(
         {
-            CONF_NAME: _entity_name(
-                config, register, f"Bit {bit} {label}" if bit is not None else label
-            ),
+            CONF_NAME: _entity_name(config, register, bit),
+            CONF_ENTITY_CATEGORY: _entity_category(config, register, writable=True, bit=bit),
             CONF_BITMASK: (1 << bit) if bit is not None else 0x0001,
             CONF_USE_WRITE_MULTIPLE: False,
             CONF_INTERNAL: False,
@@ -628,6 +680,9 @@ async def _register_modbus_switch(config: dict, register: dict, *, bit: int | No
     )
     await cg.register_component(var, entity)
     await switch.register_switch(var, entity)
+    _preserve_api_key(
+        var, config, register, label=f"Bit {bit} {label}" if bit is not None else label
+    )
     parent = await cg.get_variable(entity[CONF_MODBUS_CONTROLLER_ID])
     cg.add(var.set_parent(parent))
     cg.add(var.set_use_write_mutiple(entity[CONF_USE_WRITE_MULTIPLE]))
@@ -642,7 +697,8 @@ async def _register_modbus_binary_sensor(config: dict, register: dict, bit: int,
     entity = _base_modbus_config(config, register, id_)
     entity.update(
         {
-            CONF_NAME: _entity_name(config, register, f"Bit {bit} {label}"),
+            CONF_NAME: _entity_name(config, register, bit),
+            CONF_ENTITY_CATEGORY: _entity_category(config, register, bit=bit),
             CONF_BITMASK: 1 << bit,
             CONF_INTERNAL: False,
             CONF_DISABLED_BY_DEFAULT: False,
@@ -660,6 +716,7 @@ async def _register_modbus_binary_sensor(config: dict, register: dict, bit: int,
     )
     await cg.register_component(var, entity)
     await binary_sensor.register_binary_sensor(var, entity)
+    _preserve_api_key(var, config, register, label=f"Bit {bit} {label}")
     parent = await cg.get_variable(entity[CONF_MODBUS_CONTROLLER_ID])
     cg.add(parent.add_sensor_item(var))
 

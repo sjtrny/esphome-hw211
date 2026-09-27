@@ -97,6 +97,41 @@ hw211:
 
 Start read-only. Modbus writes can change water heater operating mode, targets, schedules, offsets, and safety-related parameters. Enable `create_schedule` or `create_controls` only after confirming your model, controller, register map, and wiring.
 
+## Entity Names and Home Assistant Groups
+
+The component supplies readable names for both protocol sheets, including binary
+status and fault sensors. For example, `bottom temperature` becomes
+`Tank temperature lower`, `Setpoint of booster` becomes
+`Electric heater target temperature`, and `Duration of defrosting` becomes
+`Defrost interval`. Related settings share prefixes such as `Defrost`,
+`Disinfection`, `Electric heater`, `Expansion valve`, and `Solar pump`.
+
+Home Assistant uses the component's default entity categories to separate:
+
+- **Sensors / Controls:** everyday operating readings and controls, such as tank
+  temperatures, power, mode, and target temperature.
+- **Configuration:** the timer controls and writable engineering settings, when
+  enabled with `create_schedule` or `create_controls`.
+- **Diagnostics:** read-only engineering settings, firmware details, counters,
+  input signals, faults, combined status flags, and raw registers.
+
+With `create_controls: false`, engineering settings are read-only sensors and
+belong in Diagnostics, not Configuration. These defaults work for all users;
+no Home Assistant customization is required. Custom headings within one device
+are not provided by ESPHome: its web-server sorting groups do not group entities
+in Home Assistant. See [Home Assistant entity categories](https://developers.home-assistant.io/docs/core/entity/#registry-properties).
+
+Existing ESPHome IDs and native API keys are retained so Home Assistant can
+migrate the names without replacing existing entity IDs, history, or automation
+references. User-set names in Home Assistant still take precedence. Fresh
+installations receive entity IDs based on the new names.
+
+Only presentation metadata changes: register addresses, scaling, enum values,
+bit polarity, and writes are unchanged. Display units are corrected for defrost
+interval, electric-heater delay, expansion-valve positions, and run-time counters
+where the protocol documents them. The [entity guide](docs/entities.md) lists the
+register names and explains fields that need care when interpreting readings.
+
 ## Daily Timer Schedule
 
 Set `create_schedule: true` to create these entities without enabling the other writable controller parameters:
@@ -118,7 +153,7 @@ The component supports the ESPHome 2026.4 API used by the original EvoHeat insta
 
 Keep `send_wait_time: 250ms` and `turnaround_time: 100ms` explicit. ESPHome 2026.9 increased the Modbus client defaults to 2000ms and 600ms. An EvoHeat HW211 controller emits traffic about every 500ms, so the newer defaults can prevent the client from finding an idle window in which to send requests.
 
-GitHub Actions compiles a configuration that enables sensors, binary sensors, numbers, selects, and switches. Each change is checked against ESPHome 2026.4.5 and the tracked stable release. A weekly scheduled run also checks the latest stable release and ESPHome's development branch. Dependabot checks for stable ESPHome releases each day and opens a pull request that runs the same compile checks.
+GitHub Actions checks name coverage and migration identities, then compiles a configuration that enables sensors, binary sensors, numbers, selects, and switches. Each change is checked against ESPHome 2026.4.5 and the tracked stable release. A weekly scheduled run also checks the latest stable release and ESPHome's development branch. Dependabot checks for stable ESPHome releases each day and opens a pull request that runs the same checks.
 
 ## Protocol
 

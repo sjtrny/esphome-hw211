@@ -14,6 +14,9 @@ using value_to_data_t = std::function<float>(float);
 
 class ModbusNumber : public number::Number, public Component, public SensorItem, public Hw211WriterEntity {
  public:
+  // Preserve entity identity when its human-readable name changes.
+  void set_api_key(uint32_t key) { this->object_id_hash_ = key; }
+
   ModbusNumber(Hw211RegisterType register_type, uint16_t start_address, uint8_t offset, uint32_t bitmask,
                SensorValueType value_type, int register_count, uint16_t skip_updates, bool force_new_range) {
     this->bitmask = bitmask;

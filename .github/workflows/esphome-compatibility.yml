@@ -35,6 +35,8 @@ jobs:
           python-version: "3.12"
       - name: Install ESPHome
         run: python -m pip install --disable-pip-version-check ${{ matrix.install }}
+      - name: Check entity metadata and migration identities
+        run: python -m unittest discover -s tests
       - name: Compile all generated entity types
         run: esphome compile tests/ci.yaml
 
@@ -50,6 +52,8 @@ jobs:
           python-version: "3.12"
       - name: Install the latest ESPHome release
         run: python -m pip install --disable-pip-version-check --upgrade esphome
+      - name: Check entity metadata and migration identities
+        run: python -m unittest discover -s tests
       - name: Compile all generated entity types
         run: esphome compile tests/ci.yaml
 
@@ -65,5 +69,7 @@ jobs:
           python-version: "3.12"
       - name: Install ESPHome development
         run: python -m pip install --disable-pip-version-check "git+https://github.com/esphome/esphome.git@dev"
+      - name: Check entity metadata and migration identities
+        run: python -m unittest discover -s tests
       - name: Compile all generated entity types
         run: esphome compile tests/ci.yaml
