@@ -1,0 +1,69 @@
+name: ESPHome compatibility
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "17 5 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: esphome-compatibility-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  supported:
+    name: Supported (${{ matrix.name }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: deployed-2026.4.5
+            install: esphome==2026.4.5
+          - name: tracked-stable
+            install: -r requirements-ci.txt
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Install ESPHome
+        run: python -m pip install --disable-pip-version-check ${{ matrix.install }}
+      - name: Compile all generated entity types
+        run: esphome compile tests/ci.yaml
+
+  release-watch:
+    name: Latest stable release
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Install the latest ESPHome release
+        run: python -m pip install --disable-pip-version-check --upgrade esphome
+      - name: Compile all generated entity types
+        run: esphome compile tests/ci.yaml
+
+  development-watch:
+    name: ESPHome development branch
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Install ESPHome development
+        run: python -m pip install --disable-pip-version-check "git+https://github.com/esphome/esphome.git@dev"
+      - name: Compile all generated entity types
+        run: esphome compile tests/ci.yaml

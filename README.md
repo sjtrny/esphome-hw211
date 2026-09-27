@@ -1,5 +1,7 @@
 # HW211 ESPHome
 
+[![ESPHome compatibility](https://github.com/sjtrny/esphome-hw211/actions/workflows/esphome-compatibility.yml/badge.svg)](https://github.com/sjtrny/esphome-hw211/actions/workflows/esphome-compatibility.yml)
+
 ESPHome external component for reading HW211-family heat pump controllers locally over Modbus RTU.
 
 Based on the work of others compiled here https://community.home-assistant.io/t/implementation-of-aqua-temp-controller/230400/.
@@ -86,6 +88,12 @@ hw211:
 - `force_update`: Publish sensor updates in home assistant even when the value has not changed.
 
 Start read-only. Modbus writes can change water heater operating mode, targets, schedules, offsets, and safety-related parameters. Enable `create_controls` only after confirming your model, controller, register map, and wiring.
+
+## ESPHome Compatibility
+
+The component supports the ESPHome 2026.4 API used by the original EvoHeat installation and the current ESPHome API.
+
+GitHub Actions compiles a configuration that enables sensors, binary sensors, numbers, selects, and switches. Each change is checked against ESPHome 2026.4.5 and the tracked stable release. A weekly scheduled run also checks the latest stable release and ESPHome's development branch. Dependabot checks for stable ESPHome releases each day and opens a pull request that runs the same compile checks.
 
 ## Protocol
 

@@ -1,0 +1,2 @@
+# Dependabot updates this pin when ESPHome publishes a new stable release.
+esphome==2026.9.0

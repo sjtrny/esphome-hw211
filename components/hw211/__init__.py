@@ -6,7 +6,8 @@ from pathlib import Path
 
 import esphome.codegen as cg
 from esphome.components import binary_sensor, number, select, sensor, switch
-from esphome.components.modbus.helpers import ModbusRegisterType, SENSOR_VALUE_TYPE
+from esphome.components.modbus import helpers as modbus_helpers
+from esphome.components.modbus.helpers import MODBUS_REGISTER_TYPE, SENSOR_VALUE_TYPE
 from esphome.components.modbus_controller import ModbusController, SensorItem
 from esphome.components.modbus_controller.binary_sensor import ModbusBinarySensor
 from esphome.components.modbus_controller.const import (
@@ -57,8 +58,16 @@ CONF_CREATE_CONTROLS = "create_controls"
 CONF_CREATE_SENSORS = "create_sensors"
 CONF_CREATE_BINARY_SENSORS = "create_binary_sensors"
 
-REGISTER_TYPE_HOLDING = ModbusRegisterType.HOLDING
+REGISTER_TYPE_HOLDING = MODBUS_REGISTER_TYPE["holding"]
 VALUE_TYPE_U_WORD = SENSOR_VALUE_TYPE["U_WORD"]
+MODBUS_USES_SPAN = hasattr(modbus_helpers, "EntityType")
+
+
+def _read_buffer_type():
+    """Return the Modbus read buffer type used by this ESPHome release."""
+    if MODBUS_USES_SPAN:
+        return cg.std_span.template(cg.uint8.operator("const"))
+    return cg.std_vector.template(cg.uint8).operator("const").operator("ref")
 
 
 def _load_registers(sheet: str) -> list[dict]:
@@ -423,7 +432,7 @@ async def _register_modbus_sensor(config: dict, register: dict, *, raw: bool = F
             [
                 (ModbusSensor.operator("ptr"), "item"),
                 (cg.float_, "x"),
-                (cg.std_vector.template(cg.uint8).operator("const").operator("ref"), "data"),
+                (_read_buffer_type(), "data"),
             ],
             return_type=cg.optional.template(float),
         )
@@ -488,7 +497,7 @@ async def _register_modbus_number(config: dict, register: dict):
             [
                 (ModbusNumber.operator("ptr"), "item"),
                 (cg.float_, "x"),
-                (cg.std_vector.template(cg.uint8).operator("const").operator("ref"), "data"),
+                (_read_buffer_type(), "data"),
             ],
             return_type=cg.optional.template(float),
         )

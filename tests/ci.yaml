@@ -1,0 +1,40 @@
+esphome:
+  name: hw211-ci
+  friendly_name: HW211 CI
+
+esp32:
+  board: esp32-s3-devkitc-1
+  framework:
+    type: esp-idf
+
+logger:
+
+external_components:
+  - source:
+      type: local
+      path: ../components
+    components: [hw211]
+
+uart:
+  id: rs485
+  tx_pin: GPIO17
+  rx_pin: GPIO18
+  baud_rate: 9600
+  data_bits: 8
+  parity: NONE
+  stop_bits: 1
+
+modbus:
+  uart_id: rs485
+
+modbus_controller:
+  - id: hw211_modbus
+    address: 99
+    update_interval: 30s
+
+hw211:
+  modbus_controller_id: hw211_modbus
+  name_prefix: HW211 CI
+  create_sensors: true
+  create_controls: true
+  create_binary_sensors: true

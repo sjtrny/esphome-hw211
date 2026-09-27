@@ -9,8 +9,8 @@ static const char *const TAG = "modbus_controller.sensor";
 
 void ModbusSensor::dump_config() { LOG_SENSOR(TAG, "Modbus Controller Sensor", this); }
 
-void ModbusSensor::parse_and_publish(const std::vector<uint8_t> &data) {
-  float result = payload_to_float(data, *this);
+void ModbusSensor::parse_and_publish(Hw211ReadBuffer data) {
+  float result = hw211_payload_to_float(data, *this);
 
   // Is there a lambda registered
   // call it with the pre converted value and the raw data array

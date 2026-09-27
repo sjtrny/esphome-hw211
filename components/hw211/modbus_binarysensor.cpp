@@ -8,17 +8,17 @@ static const char *const TAG = "modbus_controller.binary_sensor";
 
 void ModbusBinarySensor::dump_config() { LOG_BINARY_SENSOR("", "Modbus Controller Binary Sensor", this); }
 
-void ModbusBinarySensor::parse_and_publish(const std::vector<uint8_t> &data) {
+void ModbusBinarySensor::parse_and_publish(Hw211ReadBuffer data) {
   bool value;
 
   switch (this->register_type) {
-    case ModbusRegisterType::DISCRETE_INPUT:
-    case ModbusRegisterType::COIL:
+    case Hw211RegisterType::DISCRETE_INPUT:
+    case Hw211RegisterType::COIL:
       // offset for coil is the actual number of the coil not the byte offset
-      value = modbus::helpers::coil_from_vector(this->offset, data);
+      value = hw211_bit_from_packed(this->offset, data);
       break;
     default:
-      value = modbus::helpers::get_data<uint16_t>(data, this->offset) & this->bitmask;
+      value = hw211_get_u16(data, this->offset) & this->bitmask;
       break;
   }
   // Is there a lambda registered
