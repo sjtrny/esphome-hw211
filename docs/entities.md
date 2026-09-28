@@ -7,6 +7,8 @@ addresses between `dtu_wifi` and `hw211`.
 
 ## Interpreting the names
 
+- **Operating state** is a derived, read-only activity summary, separate from
+  the selected operating mode. See the [input registers and decision rules](../README.md#derived-operating-state).
 - **Water temperature** is the controller's app/display temperature. It is
   separate from the lower and upper tank probes.
 - **Electric heater** is the resistive booster. **Expansion valve** is the EEV.

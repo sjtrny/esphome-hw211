@@ -78,6 +78,7 @@ hw211:
   name_prefix: "HW211"
   sheet: dtu_wifi
   create_sensors: true
+  create_operating_state: true
   create_schedule: false
   create_controls: false
   create_binary_sensors: true
@@ -89,6 +90,7 @@ hw211:
 - `name_prefix`: Prefix used for generated entity IDs.
 - `sheet`: Register sheet to use. Supported values are `dtu_wifi` and `hw211`.
 - `create_sensors`: Create readable sensor entities.
+- `create_operating_state`: Create the read-only `Operating state` text sensor (default: `true`). It also works when the other sensor/control creation flags are off.
 - `create_schedule`: Create native time controls and enable switches for the two daily timer periods.
 - `create_controls`: Create writable number/select/switch entities. Keep this off until you are comfortable writing to the controller.
 - `create_binary_sensors`: Create binary sensors for readable bitfields.
@@ -136,6 +138,50 @@ bit polarity, and writes are unchanged. Display units are corrected for defrost
 interval, electric-heater delay, expansion-valve positions, and run-time counters
 where the protocol documents them. The [entity guide](docs/entities.md) lists the
 register names and explains fields that need care when interpreting readings.
+
+## Derived Operating State
+
+`Operating state` describes current activity, not the selected operating mode
+(Intelligent, Economic, Hybrid, etc.). It is enabled by default and appears with
+the everyday sensors in Home Assistant. No local template or extra binary
+sensor configuration is required. Set `create_operating_state: false` to omit it.
+
+The first matching condition wins:
+
+| State | Condition |
+| --- | --- |
+| `Unknown` | Source data is missing, invalid or stale, or the Modbus controller is offline |
+| `Fault / protection` | The fault/protection word is nonzero |
+| `Defrosting` | Function-status bit 2 is set |
+| `Heating + boost` | Compressor and electric-heater output bits are both set |
+| `Heating` | Compressor output bit 8 is set |
+| `Electric heating` | Electric-heater output bit 9 is set |
+| `Off` | No heating/defrost output is reported and power is 0 |
+| `Idle` | Power is 1, with no heating, defrost or fault reported |
+
+The inputs are the following existing registers:
+
+| Input | `dtu_wifi` | `hw211` |
+| --- | ---: | ---: |
+| Power | 1011 | 1011 |
+| Component status flags | 2050 | 2030 |
+| Operating status flags | 2051 | 2031 |
+| Fault flags | 2085 | 2060 |
+
+The component tests individual bits, not equality with the complete status word.
+It reuses existing numeric readers where possible and creates internal word
+readers otherwise. It never writes to the heater. Each decision waits for a
+fresh report of all four fields to reduce transient states between Modbus
+responses. Missing data becomes `Unknown` after three controller polling
+intervals (at least 30 seconds); an offline callback invalidates it immediately.
+An ESPHome API disconnection still makes the HA entity unavailable as usual.
+
+`Idle` means neither heat source is reported running: fans or pumps can still
+operate. It does not distinguish target satisfied, hysteresis, start delay or a
+timer restriction. `Heating` refers to the controller's compressor output in
+hot-water operation, not an independent measurement of heat transfer. The
+reversing valve alone is not treated as defrost. Temperatures, targets, timer
+times and whole-hour counters are not used to infer activity.
 
 ## Daily Timer Schedule
 

@@ -5,7 +5,7 @@ import re
 from pathlib import Path
 
 import esphome.codegen as cg
-from esphome.components import binary_sensor, datetime, number, select, sensor, switch
+from esphome.components import binary_sensor, datetime, number, select, sensor, switch, text_sensor
 from esphome.components.modbus import helpers as modbus_helpers
 from esphome.components.modbus.helpers import MODBUS_REGISTER_TYPE, SENSOR_VALUE_TYPE
 from esphome.components.modbus_controller import ModbusController, SensorItem
@@ -56,7 +56,7 @@ from .entity_metadata import (
 
 
 DEPENDENCIES = ["modbus_controller"]
-AUTO_LOAD = ["binary_sensor", "datetime", "number", "select", "sensor", "switch"]
+AUTO_LOAD = ["binary_sensor", "datetime", "number", "select", "sensor", "switch", "text_sensor"]
 CODEOWNERS = ["@local"]
 
 CONF_INCLUDE_RESERVED = "include_reserved"
@@ -67,6 +67,7 @@ CONF_CREATE_CONTROLS = "create_controls"
 CONF_CREATE_SENSORS = "create_sensors"
 CONF_CREATE_BINARY_SENSORS = "create_binary_sensors"
 CONF_CREATE_SCHEDULE = "create_schedule"
+CONF_CREATE_OPERATING_STATE = "create_operating_state"
 
 REGISTER_TYPE_HOLDING = MODBUS_REGISTER_TYPE["holding"]
 VALUE_TYPE_U_WORD = SENSOR_VALUE_TYPE["U_WORD"]
@@ -79,6 +80,15 @@ Hw211ScheduleTime = modbus_controller_ns.class_(
 Hw211ScheduleEnableSwitch = modbus_controller_ns.class_(
     "Hw211ScheduleEnableSwitch", switch.Switch, cg.Component, SensorItem
 )
+Hw211OperatingState = cg.esphome_ns.namespace("hw211").class_(
+    "Hw211OperatingState", text_sensor.TextSensor, cg.PollingComponent
+)
+
+# StateInput order: power, component outputs, functions, faults.
+STATE_REGISTERS = {
+    "dtu_wifi": (1011, 2050, 2051, 2085),
+    "hw211": (1011, 2030, 2031, 2060),
+}
 
 SCHEDULE_PERIODS = (
     # Register 1133 uses one start-enable and one end-enable bit per period.
@@ -128,6 +138,10 @@ def _entity_id(prefix: str, register: dict, suffix: str):
 
 def _schedule_entity_id(prefix: str, period: int, suffix: str):
     return f"{_slug(prefix)}_timer_{period}_{suffix}"
+
+
+def _operating_state_id(config: dict):
+    return f"{_slug(config[CONF_NAME_PREFIX])}_operating_state"
 
 
 def _legacy_entity_name(config: dict, register: dict, label: str | None = None) -> str:
@@ -458,6 +472,20 @@ def _declare_generated_ids(config: dict):
                 )
             )
 
+    if config[CONF_CREATE_OPERATING_STATE]:
+        ids.append(cv.declare_id(Hw211OperatingState)(_operating_state_id(config)))
+        declared = {str(id_) for id_ in ids}
+        for register in registers:
+            if register["address"] not in STATE_REGISTERS[config[CONF_SHEET]]:
+                continue
+            if not any(
+                _entity_id(config[CONF_NAME_PREFIX], register, suffix) in declared
+                for suffix in ("sensor", "raw_sensor")
+            ):
+                ids.append(cv.declare_id(ModbusSensor)(
+                    _entity_id(config[CONF_NAME_PREFIX], register, "state_source")
+                ))
+
     if config[CONF_CREATE_SCHEDULE]:
         for schedule in SCHEDULE_PERIODS:
             period = schedule["period"]
@@ -481,20 +509,23 @@ def _declare_generated_ids(config: dict):
     return config
 
 
-async def _register_modbus_sensor(config: dict, register: dict, *, raw: bool = False):
+async def _register_modbus_sensor(
+    config: dict, register: dict, *, raw: bool = False, internal: bool = False
+):
     data_type = register["data_type"]
     read_lambda, _ = _scale_expr(data_type)
     id_ = cv.declare_id(ModbusSensor)(
-        _entity_id(config[CONF_NAME_PREFIX], register, "raw_sensor" if raw else "sensor")
+        _entity_id(config[CONF_NAME_PREFIX], register, "state_source" if internal else ("raw_sensor" if raw else "sensor"))
     )
     entity = _base_modbus_config(config, register, id_)
     entity.update(
         {
-            CONF_NAME: _entity_name(config, register) + (" Raw" if raw else ""),
+            CONF_NAME: (f"Operating state source {register['address']}" if internal
+                        else _entity_name(config, register) + (" Raw" if raw else "")),
             CONF_ENTITY_CATEGORY: _entity_category(config, register, raw=raw),
             CONF_BITMASK: 0xFFFFFFFF,
-            CONF_INTERNAL: False,
-            CONF_DISABLED_BY_DEFAULT: raw,
+            CONF_INTERNAL: internal,
+            CONF_DISABLED_BY_DEFAULT: raw and not internal,
             CONF_FORCE_UPDATE: config[CONF_FORCE_UPDATE],
             CONF_ACCURACY_DECIMALS: 0 if raw else (1 if data_type in ("TEMP", "TEMP1", "DIGI5") else 0),
         }
@@ -522,7 +553,8 @@ async def _register_modbus_sensor(config: dict, register: dict, *, raw: bool = F
     )
     await cg.register_component(var, entity)
     await sensor.register_sensor(var, entity)
-    _preserve_api_key(var, config, register, raw=raw)
+    if not internal:
+        _preserve_api_key(var, config, register, raw=raw)
     parent = await cg.get_variable(entity[CONF_MODBUS_CONTROLLER_ID])
     cg.add(parent.add_sensor_item(var))
     if "lambda" in entity:
@@ -536,6 +568,7 @@ async def _register_modbus_sensor(config: dict, register: dict, *, raw: bool = F
             return_type=cg.optional.template(float),
         )
         cg.add(var.set_template(template_))
+    return var
 
 
 async def _register_modbus_number(config: dict, register: dict):
@@ -801,6 +834,34 @@ async def _register_schedule(config: dict):
     cg.add(enable_switches[1].set_peer(enable_switches[0]))
 
 
+async def _register_operating_state(config: dict, registers: list[dict], sources: dict):
+    addresses = STATE_REGISTERS[config[CONF_SHEET]]
+    # Reuse existing numeric readers, including disabled-by-default raw readers.
+    # Where only a switch or individual bits exist, add an internal word reader.
+    # No extra raw entities are exposed to Home Assistant.
+    for register in registers:
+        address = register["address"]
+        if address in addresses and address not in sources:
+            sources[address] = await _register_modbus_sensor(config, register, raw=True, internal=True)
+
+    entity = {
+        CONF_ID: cv.declare_id(Hw211OperatingState)(_operating_state_id(config)),
+        CONF_NAME: "Operating state",
+        CONF_ICON: "mdi:water-boiler",
+        CONF_INTERNAL: False,
+        CONF_DISABLED_BY_DEFAULT: False,
+        CONF_ENTITY_CATEGORY: "",
+    }
+    _apply_entity_schema(entity, text_sensor.text_sensor_schema(Hw211OperatingState))
+    var = cg.new_Pvariable(entity[CONF_ID])
+    await cg.register_component(var, entity)
+    await text_sensor.register_text_sensor(var, entity)
+    parent = await cg.get_variable(config[CONF_MODBUS_CONTROLLER_ID])
+    cg.add(var.set_parent(parent))
+    for index, address in enumerate(addresses):
+        cg.add(var.set_source(index, sources[address]))
+
+
 async def to_code(config):
     cg.add_global(
         cg.RawStatement(
@@ -809,16 +870,19 @@ async def to_code(config):
             '#include "esphome/components/hw211/modbus_select.h"\n'
             '#include "esphome/components/hw211/modbus_schedule.h"\n'
             '#include "esphome/components/hw211/modbus_sensor.h"\n'
-            '#include "esphome/components/hw211/modbus_switch.h"'
+            '#include "esphome/components/hw211/modbus_switch.h"\n'
+            '#include "esphome/components/hw211/operating_state.h"'
         )
     )
     registers = _load_registers(config[CONF_SHEET])
+    sources = {}
     for register in registers:
         if not config[CONF_INCLUDE_RESERVED] and not _has_register_metadata(register):
             continue
 
         if config[CONF_RAW_REGISTERS] and config[CONF_CREATE_SENSORS]:
-            await _register_modbus_sensor(config, register, raw=True)
+            var = await _register_modbus_sensor(config, register, raw=True)
+            sources.setdefault(register["address"], var)
 
         if not _has_register_metadata(register):
             continue
@@ -841,11 +905,16 @@ async def to_code(config):
             elif register["data_type"] not in ("", "Binary"):
                 await _register_modbus_number(config, register)
             elif config[CONF_CREATE_SENSORS] and not config[CONF_RAW_REGISTERS]:
-                await _register_modbus_sensor(config, register, raw=True)
+                var = await _register_modbus_sensor(config, register, raw=True)
+                sources.setdefault(register["address"], var)
             continue
 
         if _is_readable(register) and config[CONF_CREATE_SENSORS]:
-            await _register_modbus_sensor(config, register)
+            var = await _register_modbus_sensor(config, register)
+            sources.setdefault(register["address"], var)
+
+    if config[CONF_CREATE_OPERATING_STATE]:
+        await _register_operating_state(config, registers, sources)
 
     if config[CONF_CREATE_SCHEDULE]:
         await _register_schedule(config)
@@ -864,6 +933,7 @@ CONFIG_SCHEMA = cv.All(
             cv.Optional(CONF_CREATE_SENSORS, default=True): cv.boolean,
             cv.Optional(CONF_CREATE_BINARY_SENSORS, default=True): cv.boolean,
             cv.Optional(CONF_CREATE_SCHEDULE, default=False): cv.boolean,
+            cv.Optional(CONF_CREATE_OPERATING_STATE, default=True): cv.boolean,
         }
     ),
     _declare_generated_ids,
