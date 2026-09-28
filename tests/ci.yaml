@@ -9,6 +9,17 @@ esp32:
 
 logger:
 
+wifi:
+  ssid: hw211-ci
+  password: hw211-ci-password
+
+api:
+
+time:
+  - platform: homeassistant
+    id: local_time
+    timezone: Australia/Sydney
+
 external_components:
   - source:
       type: local
@@ -39,5 +50,8 @@ hw211:
   name_prefix: HW211 CI
   create_sensors: true
   create_schedule: true
+  schedule_clock:
+    time_id: local_time
+    controller_utc_offset: "+09:00"
   create_controls: true
   create_binary_sensors: true

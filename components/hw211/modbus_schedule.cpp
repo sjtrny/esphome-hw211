@@ -1,4 +1,5 @@
 #include "modbus_schedule.h"
+#include "schedule_clock.h"
 
 #include "esphome/core/log.h"
 #include "esphome/core/version.h"
@@ -20,8 +21,16 @@ void Hw211ScheduleTime::parse_and_publish(Hw211ReadBuffer data) {
     return;
   }
 
-  this->hour_ = hw211_get_u16(data, this->offset);
-  this->minute_ = hw211_get_u16(data, this->offset + 2);
+  const uint16_t hour = hw211_get_u16(data, this->offset);
+  const uint16_t minute = hw211_get_u16(data, this->offset + 2);
+#ifdef USE_HW211_SCHEDULE_CLOCK
+  if (this->schedule_clock_ != nullptr) {
+    this->schedule_clock_->observe(this->clock_index_, hour, minute);
+    return;
+  }
+#endif
+  this->hour_ = hour;
+  this->minute_ = minute;
   this->second_ = 0;
   this->publish_state();
 }
@@ -40,6 +49,13 @@ void Hw211ScheduleTime::control(const datetime::TimeCall &call) {
   if (call.get_second().value_or(0) != 0) {
     ESP_LOGW(TAG, "Timer '%s' supports minute precision; seconds were ignored", this->get_name().c_str());
   }
+
+#ifdef USE_HW211_SCHEDULE_CLOCK
+  if (this->schedule_clock_ != nullptr) {
+    this->schedule_clock_->set_local_time(this->clock_index_, hour, minute);
+    return;
+  }
+#endif
 
   const std::array<uint16_t, 2> values{hour, minute};
   const uint16_t write_address = hw211_write_address(*this);

@@ -11,6 +11,10 @@
 namespace esphome {
 namespace modbus_controller {
 
+#ifdef USE_HW211_SCHEDULE_CLOCK
+class Hw211ScheduleClock;
+#endif
+
 class Hw211ScheduleTime : public datetime::TimeEntity,
                           public Component,
                           public SensorItem,
@@ -30,11 +34,29 @@ class Hw211ScheduleTime : public datetime::TimeEntity,
     this->parent_ = parent;
     this->hw211_set_controller(parent);
   }
+#ifdef USE_HW211_SCHEDULE_CLOCK
+  void set_schedule_clock(Hw211ScheduleClock *clock, uint8_t index) {
+    this->schedule_clock_ = clock;
+    this->clock_index_ = index;
+  }
+  void publish_local_minutes(uint16_t minutes) {
+    if (!this->has_state() || this->hour_ != minutes / 60 || this->minute_ != minutes % 60) {
+      this->hour_ = minutes / 60;
+      this->minute_ = minutes % 60;
+      this->second_ = 0;
+      this->publish_state();
+    }
+  }
+#endif
 
  protected:
   void control(const datetime::TimeCall &call) override;
 
   ModbusController *parent_{nullptr};
+#ifdef USE_HW211_SCHEDULE_CLOCK
+  Hw211ScheduleClock *schedule_clock_{nullptr};
+  uint8_t clock_index_{0};
+#endif
 };
 
 class Hw211ScheduleEnableSwitch : public switch_::Switch,

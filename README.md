@@ -92,6 +92,9 @@ hw211:
 - `create_sensors`: Create readable sensor entities.
 - `create_operating_state`: Create the read-only `Operating state` text sensor (default: `true`). It also works when the other sensor/control creation flags are off.
 - `create_schedule`: Create native time controls and enable switches for the two daily timer periods.
+- `schedule_clock`: Optional local-time correction for timers. Requires
+  `create_schedule: true`, a `time_id`, and the controller clock's fixed
+  `controller_utc_offset` in signed `HH:MM` format. See below.
 - `create_controls`: Create writable number/select/switch entities. Keep this off until you are comfortable writing to the controller.
 - `create_binary_sensors`: Create binary sensors for readable bitfields.
 - `raw_registers`: Also create disabled-by-default raw register sensors.
@@ -198,9 +201,66 @@ Home Assistant sorts the device page by name. These default names put each timer
 
 Earlier versions called the stop controls `Timer 1 End` and `Timer 2 End`. Their ESPHome IDs and API keys are retained so Home Assistant can migrate the names while keeping existing entity IDs. A user-set name in Home Assistant takes precedence over the component's default; clear that name to use the new default. Updating the component does not change the stored times or enable flags.
 
-The controller runs during each enabled interval and stops outside enabled intervals. Each enable switch controls the matching start and end events together. Timer settings are read from the controller before writes are accepted, and writes preserve the other timer's enable bits. Times have one-minute precision and use the clock configured on the HW211 controller; this component does not synchronize that clock.
+The controller runs during each enabled interval and stops outside enabled intervals. Each enable switch controls the matching start and end events together. Timer settings are read from the controller before writes are accepted, and writes preserve the other timer's enable bits. Times have one-minute precision. By default they use the clock configured on the HW211 controller; the optional correction below presents local times instead. Neither mode synchronizes the controller's clock.
 
 Configure the start and end time before enabling a timer.
+
+### Controller clock offset and daylight saving
+
+If the controller keeps a fixed clock while your local time observes daylight
+saving, configure the controller clock's **absolute UTC/GMT offset**, not the
+number of hours it is behind Home Assistant:
+
+```yaml
+time:
+  - platform: homeassistant
+    id: local_time
+    timezone: Australia/Sydney  # Use your actual local time zone, including DST rules.
+
+hw211:
+  modbus_controller_id: hw211_modbus
+  create_schedule: true
+  schedule_clock:
+    time_id: local_time
+    controller_utc_offset: "+09:00"
+```
+
+This adds **Timer clock UTC offset** to Home Assistant's Configuration section.
+Enter a signed value such as `+09:00`, `+09:30` or `-03:30` (range -14:00 to
++14:00). It is saved on the adapter; later UI changes take precedence over the
+YAML initial value. Use an ESPHome time source with the correct local time
+zone. The explicit zone above also works on older supported ESPHome releases.
+
+Start and Stop remain **local wall times** in Home Assistant. Conversion is:
+
+```text
+controller timer = local timer + controller UTC offset - local UTC offset
+```
+
+The result wraps around midnight. For example, with a UTC+09:00 controller and
+Sydney at UTC+10:00, 06:00 in HA writes 05:00 to the controller. When Sydney is
+UTC+11:00, the same HA time writes 04:00. Readbacks are translated back to local
+time. Editing the offset or a timer keeps the other local timer values intact.
+
+On first enabling correction, the currently displayed timer numbers are kept
+as the intended local times and the native registers are adjusted accordingly.
+The adapter then checks for local UTC-offset changes every second and updates
+the native timers automatically. All four endpoints are written together to
+1134–1141; timer-enable bits and the controller clock are not changed.
+
+Correction requires valid synchronized local time and fresh timer readbacks.
+Its saved mapping and pending-write state survive restarts, so rebooting does
+not apply the offset twice. Native-panel timer edits are read back through the
+applied mapping. Writes are confirmed by subsequent register reads and retried
+if needed. The device keeps its native schedule while the adapter is offline;
+any correction is applied after the adapter recovers its time and readbacks.
+
+This compensates a fixed offset, not clock drift or automatic clock changes
+made by the controller itself. Times inside a skipped/repeated DST hour remain
+ambiguous; ordinary times such as 06:00 are the intended use. Removing
+`schedule_clock` returns the UI to native controller times without undoing
+register values already written. Erasing adapter preferences also erases the
+saved mapping, so review the timers when enabling correction again afterward.
 
 ## ESPHome Compatibility
 
@@ -208,7 +268,7 @@ The component supports the ESPHome 2026.4 API used by the original EvoHeat insta
 
 Keep `send_wait_time: 250ms` and `turnaround_time: 100ms` explicit. ESPHome 2026.9 increased the Modbus client defaults to 2000ms and 600ms. An EvoHeat HW211 controller emits traffic about every 500ms, so the newer defaults can prevent the client from finding an idle window in which to send requests.
 
-GitHub Actions checks name coverage and migration identities, then compiles a configuration that enables sensors, binary sensors, numbers, selects, and switches. Each change is checked against ESPHome 2026.4.5 and the tracked stable release. A weekly scheduled run also checks the latest stable release and ESPHome's development branch. Dependabot checks for stable ESPHome releases each day and opens a pull request that runs the same checks.
+GitHub Actions checks name coverage, migration identities, operating-state logic and timer clock correction (including DST and restart recovery), then compiles a configuration with all entity types and timer correction enabled. Each change is checked against ESPHome 2026.4.5 and the tracked stable release. A weekly scheduled run also checks the latest stable release and ESPHome's development branch. Dependabot checks for stable ESPHome releases each day and opens a pull request that runs the same checks.
 
 ## Protocol
 

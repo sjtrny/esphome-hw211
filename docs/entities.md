@@ -59,6 +59,11 @@ register sheet:
 Optional writable controls for these settings retain their existing categories.
 The derived Operating state sensor remains in Sensors.
 
+With `schedule_clock` configured, **Timer clock UTC offset** is a persistent
+Configuration text field in signed `HH:MM` format. Native Start/Stop entity IDs
+are retained, but their values use local time and include DST correction. See
+the [clock-offset setup and conversion rules](../README.md#controller-clock-offset-and-daylight-saving).
+
 Entity creation flags and disabled-by-default behavior are unchanged. Raw
 register sensors keep the `Raw` suffix and remain disabled by default. Unknown
 reserved registers keep an address-based name. ESPHome IDs and API keys retain

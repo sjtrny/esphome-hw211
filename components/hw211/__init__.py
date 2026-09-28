@@ -5,7 +5,7 @@ import re
 from pathlib import Path
 
 import esphome.codegen as cg
-from esphome.components import binary_sensor, datetime, number, select, sensor, switch, text_sensor
+from esphome.components import binary_sensor, datetime, number, select, sensor, switch, text, text_sensor, time
 from esphome.components.modbus import helpers as modbus_helpers
 from esphome.components.modbus.helpers import MODBUS_REGISTER_TYPE, SENSOR_VALUE_TYPE
 from esphome.components.modbus_controller import ModbusController, SensorItem
@@ -39,10 +39,12 @@ from esphome.const import (
     CONF_INTERNAL,
     CONF_MAX_VALUE,
     CONF_MIN_VALUE,
+    CONF_MODE,
     CONF_NAME,
     CONF_OPTIMISTIC,
     CONF_STATE_CLASS,
     CONF_STEP,
+    CONF_TIME_ID,
     CONF_UNIT_OF_MEASUREMENT,
 )
 
@@ -57,7 +59,7 @@ from .entity_metadata import (
 
 
 DEPENDENCIES = ["modbus_controller"]
-AUTO_LOAD = ["binary_sensor", "datetime", "number", "select", "sensor", "switch", "text_sensor"]
+AUTO_LOAD = ["binary_sensor", "datetime", "number", "select", "sensor", "switch", "text", "text_sensor"]
 CODEOWNERS = ["@local"]
 
 CONF_INCLUDE_RESERVED = "include_reserved"
@@ -69,6 +71,8 @@ CONF_CREATE_SENSORS = "create_sensors"
 CONF_CREATE_BINARY_SENSORS = "create_binary_sensors"
 CONF_CREATE_SCHEDULE = "create_schedule"
 CONF_CREATE_OPERATING_STATE = "create_operating_state"
+CONF_SCHEDULE_CLOCK = "schedule_clock"
+CONF_CONTROLLER_UTC_OFFSET = "controller_utc_offset"
 
 REGISTER_TYPE_HOLDING = MODBUS_REGISTER_TYPE["holding"]
 VALUE_TYPE_U_WORD = SENSOR_VALUE_TYPE["U_WORD"]
@@ -80,6 +84,9 @@ Hw211ScheduleTime = modbus_controller_ns.class_(
 )
 Hw211ScheduleEnableSwitch = modbus_controller_ns.class_(
     "Hw211ScheduleEnableSwitch", switch.Switch, cg.Component, SensorItem
+)
+Hw211ScheduleClock = modbus_controller_ns.class_(
+    "Hw211ScheduleClock", text.Text, cg.PollingComponent
 )
 Hw211OperatingState = cg.esphome_ns.namespace("hw211").class_(
     "Hw211OperatingState", text_sensor.TextSensor, cg.PollingComponent
@@ -143,6 +150,28 @@ def _schedule_entity_id(prefix: str, period: int, suffix: str):
 
 def _operating_state_id(config: dict):
     return f"{_slug(config[CONF_NAME_PREFIX])}_operating_state"
+
+
+def _schedule_clock_id(config: dict):
+    return f"{_slug(config[CONF_NAME_PREFIX])}_schedule_clock"
+
+
+def _utc_offset_minutes(value):
+    value = cv.string_strict(value)
+    match = re.fullmatch(r"([+-])(\d{2}):(\d{2})", value, flags=re.ASCII)
+    if not match:
+        raise cv.Invalid("Use a signed UTC offset such as '+09:00' or '-03:30'")
+    hour, minute = int(match[2]), int(match[3])
+    result = (hour * 60 + minute) * (-1 if match[1] == "-" else 1)
+    if minute > 59 or abs(result) > 840:
+        raise cv.Invalid("UTC offset must be between -14:00 and +14:00")
+    return result
+
+
+def _validate_schedule_clock(config):
+    if CONF_SCHEDULE_CLOCK in config and not config[CONF_CREATE_SCHEDULE]:
+        raise cv.Invalid("schedule_clock requires create_schedule: true")
+    return config
 
 
 def _legacy_entity_name(config: dict, register: dict, label: str | None = None) -> str:
@@ -490,6 +519,8 @@ def _declare_generated_ids(config: dict):
                 ))
 
     if config[CONF_CREATE_SCHEDULE]:
+        if CONF_SCHEDULE_CLOCK in config:
+            ids.append(cv.declare_id(Hw211ScheduleClock)(_schedule_clock_id(config)))
         for schedule in SCHEDULE_PERIODS:
             period = schedule["period"]
             ids.extend(
@@ -783,6 +814,7 @@ async def _register_schedule_time(
     parent = await cg.get_variable(config[CONF_MODBUS_CONTROLLER_ID])
     cg.add(var.set_parent(parent))
     cg.add(parent.add_sensor_item(var))
+    return var
 
 
 async def _register_schedule_enable_switch(config: dict, period: int, bitmask: int):
@@ -818,6 +850,29 @@ async def _register_schedule_enable_switch(config: dict, period: int, bitmask: i
 
 
 async def _register_schedule(config: dict):
+    clock = None
+    if CONF_SCHEDULE_CLOCK in config:
+        cg.add_define("USE_HW211_SCHEDULE_CLOCK")
+        settings = config[CONF_SCHEDULE_CLOCK]
+        entity = {
+            CONF_ID: cv.declare_id(Hw211ScheduleClock)(_schedule_clock_id(config)),
+            CONF_NAME: "Timer clock UTC offset",
+            CONF_ICON: "mdi:clock-edit-outline",
+            CONF_ENTITY_CATEGORY: "config",
+            CONF_INTERNAL: False,
+            CONF_DISABLED_BY_DEFAULT: False,
+            CONF_MODE: "TEXT",
+        }
+        _apply_entity_schema(entity, text.text_schema(Hw211ScheduleClock))
+        clock = cg.new_Pvariable(entity[CONF_ID])
+        await cg.register_component(clock, entity)
+        await text.register_text(clock, entity, min_length=6, max_length=6, pattern=r"[+-][0-9]{2}:[0-5][0-9]")
+        parent = await cg.get_variable(config[CONF_MODBUS_CONTROLLER_ID])
+        time_source = await cg.get_variable(settings[CONF_TIME_ID])
+        cg.add(clock.set_parent(parent))
+        cg.add(clock.set_time_source(time_source))
+        cg.add(clock.set_initial_offset(settings[CONF_CONTROLLER_UTC_OFFSET]))
+
     enable_switches = []
     for schedule in SCHEDULE_PERIODS:
         period = schedule["period"]
@@ -826,12 +881,16 @@ async def _register_schedule(config: dict):
                 config, period, schedule["enable_mask"]
             )
         )
-        await _register_schedule_time(
+        start = await _register_schedule_time(
             config, period, "Start", schedule["start_address"]
         )
-        await _register_schedule_time(
+        end = await _register_schedule_time(
             config, period, "End", schedule["end_address"]
         )
+        if clock is not None:
+            for index, timer in enumerate((start, end), start=(period - 1) * 2):
+                cg.add(timer.set_schedule_clock(clock, index))
+                cg.add(clock.set_timer(index, timer))
 
     cg.add(enable_switches[0].set_peer(enable_switches[1]))
     cg.add(enable_switches[1].set_peer(enable_switches[0]))
@@ -874,7 +933,8 @@ async def to_code(config):
             '#include "esphome/components/hw211/modbus_schedule.h"\n'
             '#include "esphome/components/hw211/modbus_sensor.h"\n'
             '#include "esphome/components/hw211/modbus_switch.h"\n'
-            '#include "esphome/components/hw211/operating_state.h"'
+            '#include "esphome/components/hw211/operating_state.h"\n'
+            '#include "esphome/components/hw211/schedule_clock.h"'
         )
     )
     registers = _load_registers(config[CONF_SHEET])
@@ -937,7 +997,12 @@ CONFIG_SCHEMA = cv.All(
             cv.Optional(CONF_CREATE_BINARY_SENSORS, default=True): cv.boolean,
             cv.Optional(CONF_CREATE_SCHEDULE, default=False): cv.boolean,
             cv.Optional(CONF_CREATE_OPERATING_STATE, default=True): cv.boolean,
+            cv.Optional(CONF_SCHEDULE_CLOCK): cv.Schema({
+                cv.Required(CONF_TIME_ID): cv.use_id(time.RealTimeClock),
+                cv.Required(CONF_CONTROLLER_UTC_OFFSET): _utc_offset_minutes,
+            }),
         }
     ),
+    _validate_schedule_clock,
     _declare_generated_ids,
 )
