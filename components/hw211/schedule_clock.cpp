@@ -88,12 +88,17 @@ void Hw211ScheduleClock::observe(uint8_t index, uint16_t hour, uint16_t minute) 
     return;
   }
   this->updated_[index] = millis();
+  const bool first_read = !this->model_.ready();
+  const bool was_pending = this->model_.state().pending;
+  const auto previous_raw = this->model_.raw_times();
   if (this->model_.observe(index, hour * 60 + minute)) {
     const auto &raw = this->model_.raw_times();
-    ESP_LOGD(TAG, "Controller timers: %02u:%02u-%02u:%02u, %02u:%02u-%02u:%02u; applied correction %d min%s",
-             raw[0] / 60, raw[0] % 60, raw[1] / 60, raw[1] % 60,
-             raw[2] / 60, raw[2] % 60, raw[3] / 60, raw[3] % 60,
-             this->model_.state().applied_delta, this->model_.state().pending ? " (update pending)" : "");
+    if (first_read || raw != previous_raw || (was_pending && !this->model_.state().pending)) {
+      ESP_LOGI(TAG, "Controller timers: %02u:%02u-%02u:%02u, %02u:%02u-%02u:%02u; applied correction %d min%s",
+               raw[0] / 60, raw[0] % 60, raw[1] / 60, raw[1] % 60,
+               raw[2] / 60, raw[2] % 60, raw[3] / 60, raw[3] % 60,
+               this->model_.state().applied_delta, this->model_.state().pending ? " (update pending)" : "");
+    }
   }
   // Never queue a write from within a Modbus read callback. The polling update
   // handles persistence and writes after the complete response has been parsed.
