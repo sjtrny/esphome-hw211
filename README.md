@@ -110,12 +110,16 @@ status and fault sensors. For example, `bottom temperature` becomes
 
 Home Assistant uses the component's default entity categories to separate:
 
-- **Sensors / Controls:** everyday operating readings and controls, such as tank
-  temperatures, power, mode, and target temperature.
+- **Sensors:** operating state, tank/display water temperatures, ambient and
+  coil temperatures, and the main water/cooling target temperatures.
+- **Controls:** everyday writable controls, such as power, mode and target
+  temperature, when enabled with `create_controls`.
 - **Configuration:** the timer controls and writable engineering settings, when
   enabled with `create_schedule` or `create_controls`.
 - **Diagnostics:** read-only engineering settings, firmware details, counters,
-  input signals, faults, combined status flags, and raw registers.
+  input signals, faults, combined status flags, and raw registers. This also
+  includes power and mode readbacks, electric-heater settings, ventilation
+  mode, refrigerant suction temperature and solar sensor temperature.
 
 With `create_controls: false`, engineering settings are read-only sensors and
 belong in Diagnostics, not Configuration. These defaults work for all users;

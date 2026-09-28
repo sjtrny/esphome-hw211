@@ -44,6 +44,21 @@ engineering settings, firmware, counters, raw registers, fault flags and input
 signals use Diagnostics. Functional prefixes keep related fields together in
 alphabetical lists. These are component defaults, not local HA customizations.
 
+The following read-only sensors use Diagnostics where present in the selected
+register sheet:
+
+- Electric heater independent operation
+- Electric heater target temperature
+- Operating mode
+- Operating mode active
+- Power
+- Refrigerant suction temperature
+- Solar sensor temperature
+- Ventilation mode
+
+Optional writable controls for these settings retain their existing categories.
+The derived Operating state sensor remains in Sensors.
+
 Entity creation flags and disabled-by-default behavior are unchanged. Raw
 register sensors keep the `Raw` suffix and remain disabled by default. Unknown
 reserved registers keep an address-based name. ESPHome IDs and API keys retain

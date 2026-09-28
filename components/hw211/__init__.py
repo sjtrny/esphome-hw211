@@ -49,6 +49,7 @@ from esphome.const import (
 from .entity_metadata import (
     BIT_NAMES,
     PRIMARY_BITS,
+    PRIMARY_CONTROLS,
     PRIMARY_REGISTERS,
     REGISTER_NAMES,
     UNIT_OVERRIDES,
@@ -169,7 +170,9 @@ def _entity_category(
     sheet = config[CONF_SHEET]
     address = register["address"]
     if not raw:
-        if bit is None and address in PRIMARY_REGISTERS[sheet]:
+        if bit is None and (
+            address in PRIMARY_REGISTERS[sheet] or (writable and address in PRIMARY_CONTROLS)
+        ):
             return ""
         if bit in PRIMARY_BITS[sheet].get(address, set()):
             return ""

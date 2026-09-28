@@ -236,10 +236,11 @@ BIT_NAMES = {
 
 # Only everyday operating controls/readings belong in the main HA cards.
 # Other read-only entities are diagnostics; writable settings are configuration.
-PRIMARY_SETTINGS = {1011, 1012, 1013, 1014, 1016, 1104, 1105, 1108}
+# Keep optional writable controls accessible even when their readbacks are diagnostic.
+PRIMARY_CONTROLS = {1011, 1012, 1013, 1014, 1016, 1104, 1105, 1108}
 PRIMARY_REGISTERS = {
-    "dtu_wifi": PRIMARY_SETTINGS | set(range(2019, 2026)),
-    "hw211": PRIMARY_SETTINGS | set(range(2011, 2017)),
+    "dtu_wifi": {1104, 1105, 2019, 2020, 2021, 2022, 2025},
+    "hw211": {1104, 1105, 2011, 2012, 2013, 2014},
 }
 PRIMARY_BITS = {
     "dtu_wifi": {2050: {8, 9, 10, 11, 12, 13}, 2051: {0, 2, 3}},
